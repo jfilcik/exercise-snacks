@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Exercise Snacks",
+  "version": "0.2.0",
+  "description": "Local exercise breaks around your Microsoft personal Bookings availability or Google Calendar free/busy.",
+  "minimum_chrome_version": "120",
+  "permissions": ["alarms", "notifications", "storage"],
+  "host_permissions": ["https://bookings.cloud.microsoft/*", "https://login.microsoftonline.com/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "icons": { "128": "icon128.png" },
+  "action": {
+    "default_title": "Exercise Snacks",
+    "default_popup": "index.html"
+  }
+}

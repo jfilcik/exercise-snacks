@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+.impeccable/
+.env
+.env.*
+*.log
+*.tsbuildinfo
