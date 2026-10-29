@@ -70,6 +70,39 @@ test("snapshot freshness has a strict 15-minute limit and respects local dates",
   assert.equal(snapshotFresh(null, now), false);
 });
 
+test("calendar-free plans divide the remaining workday evenly and keep the daily budget", () => {
+  const plan = makePlan(null, DEFAULT_SETTINGS, [], now);
+  assert.deepEqual(plan.map(item => item.scheduledAt), [at("11:00"), at("13:00"), at("15:00")]);
+  assert.ok(plan.every(item => item.scheduleMode === "spaced"));
+  const afternoon = makePlan(null, DEFAULT_SETTINGS, [], Date.parse(at("13:00")));
+  assert.deepEqual(afternoon.map(item => item.scheduledAt), [at("14:00"), at("15:00"), at("16:00")]);
+  assert.deepEqual(makePlan(null, DEFAULT_SETTINGS, plan, now), []);
+  assert.deepEqual(makePlan(null, DEFAULT_SETTINGS, plan.map(item => ({ ...item, status: "skipped" })), now), []);
+  assert.deepEqual(makePlan(null, { ...DEFAULT_SETTINGS, enabled: false }, [], now), []);
+  assert.deepEqual(makePlan(null, DEFAULT_SETTINGS, [], Date.parse(at("17:00"))), []);
+  assert.deepEqual(makePlan(null, DEFAULT_SETTINGS, [], Date.parse("2026-10-31T14:00:00Z")), []);
+});
+
+test("time-based fallback fills only remaining spots and respects verified reminders and actual starts", () => {
+  const oneWindow = { ...snapshot, available: [{ start: at("10:00"), end: at("10:05") }] };
+  const verified = makePlan(oneWindow, DEFAULT_SETTINGS, [], now);
+  assert.equal(verified.length, 1);
+  assert.equal(verified[0].scheduleMode, "calendar");
+  const fallback = makePlan(null, DEFAULT_SETTINGS, verified, now);
+  assert.equal(fallback.length, 2);
+  const combined = [...verified, ...fallback].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+  assert.ok(fallback.every(item => item.scheduleMode === "spaced"));
+  assert.ok(combined.every((item, index) => !index ||
+    Date.parse(item.scheduledAt) - Date.parse(combined[index - 1].scheduledAt) >= 60 * MINUTE));
+});
+
+test("time-based snooze works without a snapshot and never leaves the workday", () => {
+  const plan = makePlan(null, DEFAULT_SETTINGS, [], now);
+  const item = plan[0];
+  assert.equal(nextSnooze(null, DEFAULT_SETTINGS, item, plan, Date.parse(item.scheduledAt)), at("11:15"));
+  assert.throws(() => nextSnooze(null, DEFAULT_SETTINGS, item, plan, Date.parse(at("16:58"))), /No suitable/);
+});
+
 test("rejects malformed or overnight preferences and untrusted internal actions", () => {
   assert.deepEqual(parseSettings(DEFAULT_SETTINGS), DEFAULT_SETTINGS);
   for (const patch of [{ workStart: "17:00", workEnd: "09:00" }, { duration: "3" }, { workStart: "25:00" }, { frequency: 99 }, { enabled: "true" }]) {

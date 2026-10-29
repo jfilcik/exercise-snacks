@@ -1,20 +1,10 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { checkWorkerVersion, DEFAULT_SETTINGS, EXERCISES, exerciseChoices, exerciseOptions, type Action, type AppState, type ExerciseBreak, type Reply, type Settings } from "./model.ts";
+import { completedMinutes, DEFAULT_SETTINGS, EXERCISES, exerciseChoices, exerciseOptions, type Action, type AppState, type ExerciseBreak, type Settings } from "./model.ts";
+import { message, request } from "./client.ts";
 import { snapshotFresh } from "./scheduler.ts";
 import { dateInZone, MINUTE, timeLabel } from "./time.ts";
 import "./style.css";
-
-async function request(action: Action): Promise<AppState> {
-  if (!globalThis.chrome?.runtime?.id) {
-    throw new Error("Load the dist folder as an unpacked Chrome/Edge extension to use Exercise Snacks.");
-  }
-  const reply: Reply = await chrome.runtime.sendMessage(action);
-  if (!reply) throw new Error("The extension worker did not respond. Reload the extension and try again.");
-  checkWorkerVersion(reply.apiVersion);
-  if (!reply.ok) throw new Error(reply.error);
-  return reply.state;
-}
 
 function localDefaults(): Settings {
   return { ...DEFAULT_SETTINGS, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
@@ -39,7 +29,6 @@ function App() {
         setState(saved);
         if (initial) {
           setDraft(saved.settings ?? localDefaults());
-          if (saved.settings && !saved.settings.calendar) setTab("settings");
         }
       } catch (reason) {
         if (!disposed) setError(message(reason));
@@ -63,9 +52,10 @@ function App() {
         setNotice("Test notification sent. If you don't see it, check browser and device notification settings.");
       }
       if (action.type === "start") setNotice("Your time. Move in a way that feels comfortable.");
+      if (action.type === "start-early") setNotice("Started manually. Your calendar wasn't checked. Move in a way that feels comfortable.");
       if (action.type === "complete") setNotice("Done. A little movement, made for yourself.");
       if (action.type === "skip") setNotice("Skipped. No make-up break—pick up whenever you're ready.");
-      if (action.type === "snooze") setNotice("Moved to the next suitable opening.");
+      if (action.type === "snooze") setNotice("Reminder moved to a later time.");
       if (action.type === "different") setNotice("Here's another way to move.");
       if (action.type === "connect-google") setNotice("Google consent completed. Save preferences to check your primary calendar.");
       if (action.type === "disconnect-google") {
@@ -96,8 +86,9 @@ function App() {
     ? Math.max(0, Math.ceil((Date.parse(active.startedAt) + active.duration * MINUTE - now) / 1000)) : 0;
   const snapshot = state?.snapshot;
   const fresh = !state?.lastError && snapshotFresh(snapshot ?? null, now);
+  const spaced = todayBreaks.some((item) => item.scheduleMode === "spaced" && ["planned", "ready"].includes(item.status));
   const onboarding = state !== null && state.settings === null;
-  const completedMinutes = completed.reduce((sum, item) => sum + item.duration, 0);
+  const minutes = completedMinutes(completed);
   const dayLabel = new Intl.DateTimeFormat("en-US", {
     timeZone, weekday: "long", month: "long", day: "numeric",
   }).format(now);
@@ -116,8 +107,14 @@ function App() {
   }
 
   function startLabel(item: ExerciseBreak) {
-    if (Date.parse(item.scheduledAt) > now) return `Ready at ${label(item.scheduledAt)}`;
-    return item.status === "ready" ? "Start my break" : "Let's move";
+    if (Date.parse(item.scheduledAt) > now) return "Start early";
+    return "Start now";
+  }
+
+  async function openCoach(id: string) {
+    try {
+      await chrome.tabs.create({ url: chrome.runtime.getURL(`coach.html?id=${encodeURIComponent(id)}`) });
+    } catch (reason) { setError(message(reason)); }
   }
 
   return (
@@ -140,8 +137,9 @@ function App() {
 
       {(error || state?.lastError) && (
         <div role="alert" className="error-banner">
-          <strong>Couldn't finish that action.</strong>
+          <strong>{!error && spaced ? "Calendar check unavailable." : active && !error ? "Automatic reminders need attention." : "Couldn't finish that action."}</strong>
           <p>{error || state?.lastError}</p>
+          {!error && spaced && <p>Time-based reminders continue. They may overlap meetings; snooze or skip whenever you need.</p>}
           <button className="text-button"
             disabled={busy || (!(onboarding || tab === "settings") && !state?.settings?.enabled)}
             onClick={() => run(onboarding || tab === "settings"
@@ -169,7 +167,7 @@ function App() {
           <div className="view-heading">
             <h2>{onboarding ? "Make room for a little movement." : "Your settings"}</h2>
             <p>{onboarding
-              ? "Choose your calendar, then make a little room in your day."
+              ? "Choose your pace. A calendar is optional."
               : "Shape the pace around your day. Change anything whenever you like."}</p>
           </div>
           <form onSubmit={(event) => { event.preventDefault(); run({ type: "settings", settings: draft }); }}>
@@ -177,12 +175,13 @@ function App() {
               <label>Calendar source
                 <select value={draft.calendar?.type ?? ""}
                   onChange={(event) => setDraft({ ...draft, calendar: event.target.value === "google"
-                    ? { type: "google" } : { type: "bookings", url: "" } })}>
-                  <option value="" disabled>Choose your calendar</option>
+                    ? { type: "google" } : event.target.value === "bookings" ? { type: "bookings", url: "" } : null })}>
+                  <option value="">No calendar · evenly spaced reminders</option>
                   <option value="bookings">Microsoft personal Bookings</option>
                   <option value="google">Google Calendar / Gmail</option>
                 </select>
               </label>
+              <p className="field-note">Reminders are spread through your workday. Add a calendar to look for free gaps; if there aren't enough, time-based reminders fill the remaining spots and may overlap meetings.</p>
               {draft.calendar?.type === "bookings" && <>
                 <label>Public Bookings meeting-type link
                   <input required type="url" placeholder="https://bookings.cloud.microsoft/bookwithme/..."
@@ -276,7 +275,7 @@ function App() {
               <label className="checkbox-field">
                 <input type="checkbox" checked={draft.enabled}
                   onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} />
-                <span>Enable local reminders and automatic availability refresh</span>
+                <span>Enable local reminders (check availability when connected)</span>
               </label>
               <div className="privacy-note">
                 <strong>Your calendar. Your device.</strong>
@@ -339,6 +338,8 @@ function App() {
                 onClick={() => run({ type: "complete", id: active.id })}>
                 {remaining > 0 ? "Take your time" : "Complete exercise"}
               </button>
+              {active.exerciseId === "squats" && <button className="hero-text-button" disabled={busy}
+                onClick={() => { void openCoach(active.id); }}>Count with camera / manually</button>}
               <button className="hero-text-button" disabled={busy}
                 onClick={() => run({ type: "skip", id: active.id })}>End without logging</button>
             </div>
@@ -356,15 +357,16 @@ function App() {
               <span aria-hidden="true">·</span>
               <span>{nextBreak.duration} min</span>
               <span aria-hidden="true">·</span>
-              <span>{nextBreak.status === "ready" ? "Ready when you are" : "A little space to reset"}</span>
+              <span>{nextBreak.scheduleMode === "spaced" ? "Time-based reminder" : nextBreak.status === "ready" ? "Ready when you are" : "A little space to reset"}</span>
             </div>
             <h3 className="hero-exercise-name">{nextExercise.name}</h3>
             <p className="exercise-instruction">{nextExercise.instruction}</p>
-            <button className="primary-button hero-primary" disabled={busy || !!active ||
-              now < Date.parse(nextBreak.scheduledAt) || !state.settings?.enabled}
-              onClick={() => run({ type: "start", id: nextBreak.id })}>
+            {nextBreak.scheduleMode === "spaced" && <p className="comfort-note">Not a verified free slot. Snooze or skip if you're busy.</p>}
+            <button className="primary-button hero-primary" disabled={busy || !!active}
+              onClick={() => run({ type: "start-early", id: nextBreak.id })}>
               {startLabel(nextBreak)}
             </button>
+            <p className="comfort-note">No calendar check. Starting now replaces this reminder.</p>
             <div className="hero-alternatives" aria-label="Other choices">
               <button className="hero-text-button" disabled={busy || !canChangeExercise(nextBreak)}
                 title={!canChangeExercise(nextBreak) ? "Add another exercise in Settings to switch" : undefined}
@@ -380,14 +382,19 @@ function App() {
             <span className="rest-mark" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="m12 1.8 2.2 7.9 7.9 2.3-7.9 2.2-2.2 8-2.3-8-7.9-2.2 7.9-2.3L12 1.8Z" /></svg>
             </span>
-            <h2>{completed.length > 0 ? "You made a little room today." : "No good gap just yet."}</h2>
+            <h2>{completed.length > 0 ? "You made a little room today." : "No more reminders planned."}</h2>
             <p>{completed.length > 0
               ? `${completed.length} ${completed.length === 1 ? "snack" : "snacks"} complete. Let the rest of the day unfold.`
-              : "I'll check your selected calendar's availability. There's no need to squeeze a break in."}</p>
+              : "There may not be enough workday left to keep reminders comfortably spaced. I'll plan again on the next weekday."}</p>
             <button className="secondary-button" disabled={busy || !state.settings?.enabled}
-              onClick={() => run({ type: "refresh" })}>{busy ? "Checking..." : "Check availability"}</button>
+              onClick={() => run({ type: "refresh" })}>{busy ? "Planning..." : "Refresh plan"}</button>
           </section>
         )}
+
+        {!calendar && <div className="calendar-prompt">
+          <p>Reminders are spaced through your workday. A calendar helps find free gaps.</p>
+          <button className="text-button" onClick={() => { setDraft(state.settings!); setTab("settings"); }}>Set up calendar</button>
+        </div>}
 
         {!state.settings?.enabled && <p className="paused-note">Reminders are paused. Turn them on in Settings whenever you're ready.</p>}
 
@@ -402,8 +409,8 @@ function App() {
               <span key={index} className={index < completed.length ? "is-complete" : ""} />
             ))}
           </div>
-          <p>{completedMinutes > 0
-            ? `${completedMinutes} minutes made for you. Every bit counts.`
+          <p>{minutes > 0
+            ? `${minutes} minutes made for you. Every bit counts.`
             : "No streaks. No score. Just a little room when it fits."}</p>
         </section>
 
@@ -419,10 +426,12 @@ function App() {
                   <span className="later-name">{name}</span>
                   <span className="later-duration">{item.duration} min</span>
                 </div>
+                {actionable && item.scheduleMode === "spaced" && <p className="field-note">Time-based · not a verified free slot</p>}
                 {actionable && <div className="later-actions">
-                  <button className="text-button" disabled={busy || !!active ||
-                    now < Date.parse(item.scheduledAt) || !state.settings?.enabled}
-                    onClick={() => run({ type: "start", id: item.id })}>Start</button>
+                  <button className="text-button" disabled={busy || !!active}
+                    onClick={() => run({ type: "start-early", id: item.id })}>
+                    {now < Date.parse(item.scheduledAt) ? "Start early" : "Start now"}
+                  </button>
                   <button className="text-button" disabled={busy || !canChangeExercise(item)}
                     title={!canChangeExercise(item) ? "Add another exercise in Settings to switch" : undefined}
                     onClick={() => run({ type: "different", id: item.id })}>Different</button>
@@ -438,16 +447,17 @@ function App() {
 
         <section className="availability-section">
           <div className="availability-status">
-            <span className={`status-pill ${fresh ? "is-on" : ""}`}>
-              <span className="status-dot" aria-hidden="true" />{fresh ? "Fresh snapshot" : "Refresh needed"}
+            <span className={`status-pill ${calendar && fresh ? "is-on" : ""}`}>
+              <span className="status-dot" aria-hidden="true" />{!calendar ? "No calendar" : fresh ? "Fresh snapshot" : "Refresh needed"}
             </span>
-            <span>{snapshot?.date === today ? `${snapshot.available.length} available windows` : "Calendar availability"}</span>
+            <span>{!calendar ? "Evenly spaced reminders" : snapshot?.date === today ? `${snapshot.available.length} available windows${spaced ? " · time-based fallback" : ""}` : "Calendar availability"}</span>
             <button className="text-button" disabled={busy || !state.settings?.enabled}
               onClick={() => run({ type: "refresh" })}>Refresh</button>
           </div>
           <details className="availability-details">
             <summary>About your availability</summary>
-            <p>{calendar?.type === "google"
+            <p>{!calendar ? "Your calendar isn't connected. Reminders use only your work hours, not free/busy data. Set up a calendar in Settings whenever you're ready."
+              : calendar.type === "google"
               ? "Free/busy from your primary Google Calendar only. Secondary or shared calendars are not checked. No appointments are created."
               : "Published personal Bookings availability, not your complete work calendar. Booking rules may hide otherwise free time. No appointments are created."}</p>
             {snapshot?.date === today && <>
@@ -456,7 +466,7 @@ function App() {
                   <li key={slot.start}>{label(slot.start)} – {label(slot.end)}</li>
                 ))}</ul>
                 : <p>No verified available windows were returned for today.</p>}
-              <p className="field-note">Updated {label(snapshot.fetchedAt)} · {timeZone}. Enabled reminders check every 5 minutes and recheck before notifying or starting.</p>
+              <p className="field-note">Updated {label(snapshot.fetchedAt)} · {timeZone}. Calendar-based reminders recheck availability. Time-based reminders aren't verified free slots and may overlap meetings.</p>
             </>}
             {calendar?.type === "bookings" && <a href={calendar.url} target="_blank" rel="noreferrer">Open your Bookings page</a>}
             {calendar?.type === "google" && <a href="https://calendar.google.com/" target="_blank" rel="noreferrer">Open Google Calendar</a>}
@@ -479,10 +489,19 @@ function App() {
                   timeZone: "UTC", weekday: "short", month: "short", day: "numeric",
                 }).format(new Date(`${date}T12:00:00Z`))}</span>
                 <span>{done.length} {done.length === 1 ? "snack" : "snacks"}</span>
-                <strong>{done.reduce((sum, item) => sum + item.duration, 0)} min</strong>
+                <strong>{completedMinutes(done)} min</strong>
               </div>;
             })}
           </div>
+          {state.breaks.some((item) => item.status === "completed" && item.reps) && <section className="rep-history">
+            <h3>Recent counted sets</h3>
+            {state.breaks.filter((item) => item.status === "completed" && item.reps).slice(-7).reverse().map((item) => (
+              <p key={item.id}>
+                {item.date} · {item.reps!.completedReps}/{item.reps!.targetReps} squats · {item.reps!.countingMode === "camera" ? "Camera-assisted estimate" : "Manual count"}
+                {item.reps!.manualAdjustment !== 0 ? ` (${item.reps!.manualAdjustment > 0 ? "+" : ""}${item.reps!.manualAdjustment} adjusted)` : ""}
+              </p>
+            ))}
+          </section>}
           <p className="history-total">All-time: {state.breaks.filter((item) => item.status === "completed").length} completed snacks. History stays in this browser until you delete it.</p>
           <button className="secondary-button" onClick={() => setTab("today")}>Back to today</button>
         </section>
@@ -494,10 +513,6 @@ function App() {
       </footer>
     </main>
   );
-}
-
-function message(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason);
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

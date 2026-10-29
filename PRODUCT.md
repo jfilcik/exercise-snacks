@@ -12,7 +12,7 @@ Assumption awaiting confirmation: the primary user is an individual desk-based w
 
 ## Product Purpose
 
-Exercise Snacks is a local-first browser extension that helps a person make room for brief movement during the workday. It uses the user's public personal Bookings availability or optional Google Calendar free/busy to schedule a small number of reminders, and keeps preferences and exercise history in the browser. Success means a person can quickly start, snooze, skip, and complete a comfortable exercise break. Bookings works without calendar sign-in; Google requires configured OAuth and explicit consent.
+Exercise Snacks is a local-first browser extension that helps a person make room for brief movement during the workday. It spaces reminders through the workday and optionally uses the user's public personal Bookings availability or Google Calendar free/busy to prefer free gaps, and keeps preferences and exercise history in the browser. Success means a person can quickly start, snooze, skip, and complete a comfortable exercise break. Bookings works without calendar sign-in; Google requires configured OAuth and explicit consent.
 
 ## Positioning
 
@@ -30,8 +30,11 @@ The app is a Chrome or Edge extension used during a workday. The user opens the 
 - Stores preferences, plans, and exercise history locally in the browser; it does not use a cloud backend or analytics.
 - Schedules on weekdays within the configured workday and chosen IANA time zone, including day boundaries and DST.
 - Microsoft Graph access and application-registration experiments are not part of this app or repository.
-- The extension fails closed when availability cannot be verified.
+- Calendar-based reminders require verified availability. When no calendar is configured, checks fail, or there are insufficient gaps, remaining reminders are evenly spaced through the remaining workday and explicitly labeled time-based, not verified free slots. They may overlap meetings. Calendar failures remain visible; providers never invent availability.
 - Offers an opt-in challenging bodyweight strength/cardio style alongside gentle and easy movement. Users can choose a random set or select a single exercise; planned choices persist locally.
+- Allows starting today's planned snack manually without calendar requests, free/busy checks, work-hour restrictions or depending on the reminder toggle. It consumes that same snack and removes its reminder; finished/old-day snacks cannot be reopened, and another active session still blocks starting. Nearby reminders are removed and replanned from fresh availability when available and time-based reminders otherwise, preserving spacing and the daily budget.
+- Offers an experimental, optional Camera Coach for squat counts in a dedicated tab. MediaPipe/WASM/model assets are packaged locally; audio is off, and no camera frames or landmark sequences are uploaded or saved. Manual counting/correction and normal timer completion remain available.
+- Stops the camera when pausing, stopping, hiding/closing the tab, ending the session, or reaching the rep target. Only a summary is saved after explicit confirmation. Counts estimate repetitions; they do not verify exercise quality. Five-person Windows/Mac accuracy/performance validation remains outstanding.
 
 ## Brand Commitments
 

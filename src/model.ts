@@ -30,9 +30,19 @@ export type ExerciseBreak = {
   exerciseId: string;
   status: "planned" | "ready" | "active" | "completed" | "skipped" | "missed" | "cancelled";
   snoozes: number;
+  scheduleMode?: "calendar" | "spaced";
   startedAt?: string;
   completedAt?: string;
+  reps?: RepSummary;
 };
+export type RepResult = {
+  targetReps: number;
+  completedReps: number;
+  automaticReps: number;
+  manualAdjustment: number;
+  countingMode: "camera" | "manual";
+};
+export type RepSummary = RepResult & { elapsedSeconds: number };
 export type AppState = {
   version: 1;
   settings: Settings | null;
@@ -43,8 +53,9 @@ export type AppState = {
 export type Action =
   | { type: "get" | "refresh" | "heartbeat" | "reset" | "test-notification" | "connect-google" | "disconnect-google" }
   | { type: "settings"; settings: Settings }
-  | { type: "start" | "complete" | "skip" | "snooze" | "different" | "alarm"; id: string };
-export const API_VERSION = 2;
+  | { type: "start" | "start-early" | "complete" | "skip" | "snooze" | "different" | "alarm"; id: string }
+  | { type: "complete-reps"; id: string; reps: RepResult };
+export const API_VERSION = 5;
 export type Reply = ({ ok: true; state: AppState } | { ok: false; error: string }) & { apiVersion: typeof API_VERSION };
 
 export function checkWorkerVersion(version: unknown): void {
@@ -176,8 +187,39 @@ export function parseAction(value: unknown): Action {
   if (["get", "refresh", "reset", "test-notification", "connect-google", "disconnect-google"].includes(String(a.type))) {
     return { type: a.type as "get" | "refresh" | "reset" | "test-notification" | "connect-google" | "disconnect-google" };
   }
-  if (["start", "complete", "skip", "snooze", "different"].includes(String(a.type)) && typeof a.id === "string") {
-    return { type: a.type as "start" | "complete" | "skip" | "snooze" | "different", id: a.id };
+  if (a.type === "complete-reps" && typeof a.id === "string") {
+    return { type: "complete-reps", id: a.id, reps: parseRepResult(a.reps) };
   }
+  if (["start", "start-early", "complete", "skip", "snooze", "different"].includes(String(a.type)) && typeof a.id === "string") {
+    return { type: a.type as "start" | "start-early" | "complete" | "skip" | "snooze" | "different", id: a.id };
+  }
+
   throw new Error("Unknown extension action.");
+}
+
+export function parseRepResult(value: unknown): RepResult {
+  if (!value || typeof value !== "object") throw new Error("Rep summary is missing.");
+  const r = value as Record<string, unknown>;
+  function integer(key: string, min: number, max: number): number {
+    const n = r[key];
+    if (typeof n !== "number" || !Number.isInteger(n) || n < min || n > max) {
+      throw new Error(`Invalid ${key} in rep summary.`);
+    }
+    return n;
+  }
+  const targetReps = integer("targetReps", 1, 100);
+  const completedReps = integer("completedReps", 1, 1000);
+  const automaticReps = integer("automaticReps", 0, 1000);
+  const manualAdjustment = integer("manualAdjustment", -1000, 1000);
+  if ((r.countingMode !== "camera" && r.countingMode !== "manual") ||
+      completedReps !== automaticReps + manualAdjustment ||
+      (r.countingMode === "manual" && automaticReps !== 0)) {
+    throw new Error("Rep count, adjustments, and counting mode do not agree.");
+  }
+  return { targetReps, completedReps, automaticReps, manualAdjustment, countingMode: r.countingMode };
+}
+
+export function completedMinutes(items: ExerciseBreak[]): number {
+  return Math.round(items.filter((item) => item.status === "completed")
+    .reduce((sum, item) => sum + (item.reps ? item.reps.elapsedSeconds / 60 : item.duration), 0) * 10) / 10;
 }

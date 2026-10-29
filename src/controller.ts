@@ -1,6 +1,6 @@
-import { chooseExercise, EXERCISES, exerciseChoices, initialState, parseSettings, type Action, type AppState, type ExerciseBreak, type Settings, type Snapshot } from "./model.ts";
+import { chooseExercise, EXERCISES, exerciseChoices, initialState, parseRepResult, parseSettings, type Action, type AppState, type ExerciseBreak, type Settings, type Snapshot } from "./model.ts";
 import { REMINDER_BUTTONS } from "./notification-actions.ts";
-import { fits, makePlan, nextSnooze, snapshotFresh } from "./scheduler.ts";
+import { fits, fitsWorkday, makePlan, nextSnooze, snapshotFresh } from "./scheduler.ts";
 import { dateInZone, MINUTE } from "./time.ts";
 
 export interface Ports {
@@ -30,36 +30,61 @@ export class Controller {
 
   private async refresh(state: AppState, now: number, force = false): Promise<void> {
     if (!state.settings?.enabled) return;
-    if (!force && snapshotFresh(state.snapshot, now) && !state.lastError) return;
-    try {
-      state.snapshot = await this.ports.fetchSnapshot(dateInZone(now, state.settings.timeZone), now, state.settings);
-      if (state.snapshot.timeZone !== state.settings.timeZone ||
-          state.snapshot.date !== dateInZone(now, state.settings.timeZone)) {
-        throw new Error("Calendar returned a different day or time zone. Availability was not used.");
-      }
-      now = this.clock();
+    if (!state.settings.calendar) {
+      state.snapshot = null;
       state.lastError = null;
-    } catch (reason) {
-      await this.ports.syncAlarms([]);
-      await this.ports.clearNotifications([]);
-      throw reason;
+    } else if (force || !snapshotFresh(state.snapshot, now) || state.lastError) {
+      try {
+        const snapshot = await this.ports.fetchSnapshot(dateInZone(now, state.settings.timeZone), now, state.settings);
+        now = this.clock();
+        if (snapshot.timeZone !== state.settings.timeZone ||
+            snapshot.date !== dateInZone(now, state.settings.timeZone) || !snapshotFresh(snapshot, now)) {
+          throw new Error("Calendar returned stale availability or a different day or time zone. Availability was not used.");
+        }
+        state.snapshot = snapshot;
+        state.lastError = null;
+      } catch (reason) {
+        state.snapshot = null;
+        state.lastError = reason instanceof Error ? reason.message : String(reason);
+      }
     }
+    now = this.clock();
+    const date = dateInZone(now, state.settings.timeZone);
     for (const item of state.breaks) {
       if (!["planned", "ready"].includes(item.status)) continue;
       const time = Date.parse(item.scheduledAt);
-      if (item.date !== state.snapshot.date || now - time > (item.status === "ready" ? 10 : 5) * MINUTE) {
+      if (item.date !== date || now - time > (item.status === "ready" ? 10 : 5) * MINUTE) {
         item.status = "missed";
-      } else if (!fits(state.snapshot, state.settings, Math.max(time, now), item.duration)) {
+      } else if (!this.reminderFits(state, item, Math.max(time, now), now)) {
         item.status = "cancelled";
+      } else if (item.scheduleMode === "spaced" && snapshotFresh(state.snapshot, now) &&
+          !state.lastError && fits(state.snapshot, state.settings, Math.max(time, now), item.duration)) {
+        item.scheduleMode = "calendar";
       }
     }
-    state.breaks.push(...makePlan(state.snapshot, state.settings, state.breaks, now));
+    this.plan(state, now);
+  }
+
+  private reminderFits(state: AppState, item: ExerciseBreak, start: number, now: number): boolean {
+    if (!state.settings) return false;
+    return item.scheduleMode === "spaced"
+      ? fitsWorkday(item.date, state.settings, start, item.duration)
+      : !state.lastError && snapshotFresh(state.snapshot, now) && fits(state.snapshot, state.settings, start, item.duration);
+  }
+
+  private plan(state: AppState, now: number): void {
+    if (!state.settings) return;
+    if (!state.lastError && snapshotFresh(state.snapshot, now)) {
+      state.breaks.push(...makePlan(state.snapshot, state.settings, state.breaks, now));
+    }
+    state.breaks.push(...makePlan(null, state.settings, state.breaks, now));
   }
 
   private async persist(state: AppState): Promise<void> {
     await this.ports.save(state);
-    await this.ports.syncAlarms(state.settings?.enabled && !state.lastError
-      ? state.breaks.filter((b) => b.status === "planned") : []);
+    const now = this.clock();
+    await this.ports.syncAlarms(state.settings?.enabled
+      ? state.breaks.filter((b) => b.status === "planned" && this.reminderFits(state, b, Date.parse(b.scheduledAt), now)) : []);
     await this.ports.clearNotifications(state.breaks.filter((b) => b.status === "ready").map((b) => b.id));
   }
 
@@ -68,15 +93,6 @@ export class Controller {
     let now = this.clock();
     try {
       if (state.settings) state.settings = parseSettings(state.settings);
-      if (state.settings?.enabled && !state.settings.calendar) {
-        state.settings.enabled = false;
-        state.snapshot = null;
-        state.lastError = "Choose your own calendar source in Settings, then re-enable reminders. Your exercise history is kept.";
-        for (const item of state.breaks) {
-          if (["planned", "ready"].includes(item.status)) item.status = "cancelled";
-        }
-        await this.persist(state);
-      }
       if (action.type === "get") return state;
       if (action.type === "reset") {
         await this.ports.disconnectGoogle?.();
@@ -84,7 +100,6 @@ export class Controller {
         state = initialState();
       } else if (action.type === "settings") {
         const settings = parseSettings(action.settings);
-        if (settings.enabled && !settings.calendar) throw new Error("Add your public Bookings meeting-type link or choose Google Calendar before enabling reminders.");
         state.settings = settings;
         state.snapshot = null;
         state.lastError = null;
@@ -95,7 +110,7 @@ export class Controller {
       } else if (action.type === "heartbeat" || action.type === "refresh") {
         await this.refresh(state, now, action.type === "refresh");
       } else if (action.type === "test-notification") {
-        await this.ports.notify("test", "Exercise Snacks is ready", "Notifications are working. Your real reminders will respect your selected calendar source.");
+        await this.ports.notify("test", "Exercise Snacks is ready", "Notifications are working. Reminders use your work hours; time-based reminders are not verified free slots.");
         return state;
       } else if (action.type === "connect-google") {
         if (!this.ports.connectGoogle) throw new Error("Google Calendar sign-in is unavailable in this build.");
@@ -123,8 +138,7 @@ export class Controller {
         if (!item) throw new Error("This break no longer exists. Refresh the extension.");
         if (action.type === "alarm") {
           if (item.status === "planned") {
-            if (!state.settings?.enabled || !state.snapshot ||
-                !fits(state.snapshot, state.settings, now, item.duration) ||
+            if (!state.settings?.enabled || !this.reminderFits(state, item, now, now) ||
                 now - Date.parse(item.scheduledAt) > 5 * MINUTE ||
                 state.breaks.some((b) => b.id !== item.id && ["ready", "active"].includes(b.status))) {
               item.status = "missed";
@@ -136,22 +150,55 @@ export class Controller {
               await this.ports.notify(
                 item.id,
                 `${item.duration} minutes for you`,
-                `${exercise.name}. Choose Start or Snooze below, or open the app to skip.`,
+                item.scheduleMode === "spaced"
+                  ? `${exercise.name}. Time-based reminder, not a verified free slot. Start when it suits you, or snooze.`
+                  : `${exercise.name}. Choose Start or Snooze below, or open the app to skip.`,
                 REMINDER_BUTTONS,
               );
             }
           }
-        } else if (action.type === "start") {
-          if (!["planned", "ready"].includes(item.status) || !state.settings?.enabled ||
-              !state.snapshot || Date.parse(item.scheduledAt) > now ||
-              !fits(state.snapshot, state.settings, now, item.duration)) {
-            throw new Error("This break is not available now. Refresh the plan or choose another break.");
+        } else if (action.type === "start" || action.type === "start-early") {
+          if (item.status === "active") { await this.persist(state); return state; }
+          if (!["planned", "ready"].includes(item.status) || !state.settings ||
+              item.date !== dateInZone(now, state.settings.timeZone)) {
+            throw new Error("Choose one of today's planned snacks that hasn't ended.");
+          }
+          if (action.type === "start" && (!state.settings.enabled ||
+              Date.parse(item.scheduledAt) > now || !this.reminderFits(state, item, now, now))) {
+            throw new Error("This break is not available now. Open Today and choose Start now to start manually without checking the calendar.");
           }
           if (state.breaks.some((b) => b.status === "active" && b.id !== item.id)) {
             throw new Error("Finish or skip your current exercise first.");
           }
           item.status = "active";
           item.startedAt = new Date(now).toISOString();
+          if (action.type === "start-early") {
+            if (state.lastError) {
+              state.snapshot = null;
+              state.lastError = null;
+            }
+            item.scheduledAt = item.startedAt;
+            for (const other of state.breaks) {
+              if (other.id !== item.id && ["planned", "ready"].includes(other.status) &&
+                  Math.abs(Date.parse(other.scheduledAt) - now) < 60 * MINUTE) {
+                other.status = "cancelled";
+              }
+            }
+            this.plan(state, now);
+          }
+        } else if (action.type === "complete-reps") {
+          if (item.status !== "completed") {
+            if (item.status !== "active" || !item.startedAt || item.exerciseId !== "squats") {
+              throw new Error("Rep counting is available for an active squat break only.");
+            }
+            const reps = parseRepResult(action.reps);
+            item.reps = {
+              ...reps,
+              elapsedSeconds: Math.min(item.duration * 60, Math.max(0, Math.floor((now - Date.parse(item.startedAt)) / 1000))),
+            };
+            item.status = "completed";
+            item.completedAt = new Date(now).toISOString();
+          }
         } else if (action.type === "complete") {
           if (item.status !== "completed") {
             if (item.status !== "active" || !item.startedAt ||
@@ -166,7 +213,7 @@ export class Controller {
           item.status = "skipped";
         } else if (action.type === "snooze") {
           if (!["planned", "ready"].includes(item.status) || item.snoozes >= 2 ||
-              !state.settings?.enabled || !state.snapshot || item.date !== dateInZone(now, state.settings.timeZone)) {
+              !state.settings?.enabled || item.date !== dateInZone(now, state.settings.timeZone)) {
             throw new Error("This break cannot be snoozed. Each break allows two snoozes.");
           }
           item.scheduledAt = nextSnooze(state.snapshot, state.settings, item, state.breaks, now);

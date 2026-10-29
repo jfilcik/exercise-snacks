@@ -6,10 +6,14 @@ export function workBounds(date: string, settings: Settings): [number, number] {
 }
 
 export function fits(snapshot: Snapshot, settings: Settings, start: number, duration: number): boolean {
-  const end = start + duration * MINUTE;
-  const [workStart, workEnd] = workBounds(snapshot.date, settings);
-  return start >= workStart && end <= workEnd && dateInZone(start, settings.timeZone) === snapshot.date &&
-    snapshot.available.some((slot) => start >= Date.parse(slot.start) && end <= Date.parse(slot.end));
+  return fitsWorkday(snapshot.date, settings, start, duration) &&
+    snapshot.available.some((slot) => start >= Date.parse(slot.start) && start + duration * MINUTE <= Date.parse(slot.end));
+}
+
+export function fitsWorkday(date: string, settings: Settings, start: number, duration: number): boolean {
+  const [workStart, workEnd] = workBounds(date, settings);
+  return ![0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay()) &&
+    start >= workStart && start + duration * MINUTE <= workEnd && dateInZone(start, settings.timeZone) === date;
 }
 
 export function snapshotFresh(snapshot: Snapshot | null, now: number): snapshot is Snapshot {
@@ -17,15 +21,16 @@ export function snapshotFresh(snapshot: Snapshot | null, now: number): snapshot 
     now >= Date.parse(snapshot.fetchedAt) && now - Date.parse(snapshot.fetchedAt) < 15 * MINUTE;
 }
 
-export function makePlan(snapshot: Snapshot, settings: Settings, previous: ExerciseBreak[], now: number, random = Math.random): ExerciseBreak[] {
-  if (!settings.enabled || [0, 6].includes(new Date(`${snapshot.date}T12:00:00Z`).getUTCDay())) return [];
-  const today = previous.filter((b) => b.date === snapshot.date && b.status !== "cancelled");
+export function makePlan(snapshot: Snapshot | null, settings: Settings, previous: ExerciseBreak[], now: number, random = Math.random): ExerciseBreak[] {
+  const date = snapshot?.date ?? dateInZone(now, settings.timeZone);
+  if (!settings.enabled || [0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay())) return [];
+  const today = previous.filter((b) => b.date === date && b.status !== "cancelled");
   const needed = Math.max(0, settings.frequency - today.length);
-  const [start, end] = workBounds(snapshot.date, settings);
+  const [start, end] = workBounds(date, settings);
   const candidates: number[] = [];
   for (let t = Math.ceil(Math.max(now + 2 * MINUTE, start) / (5 * MINUTE)) * 5 * MINUTE;
     t + settings.duration * MINUTE <= end; t += 5 * MINUTE) {
-    if (fits(snapshot, settings, t, settings.duration)) candidates.push(t);
+    if (!snapshot || fits(snapshot, settings, t, settings.duration)) candidates.push(t);
   }
   const chosen: number[] = today.map((b) => Date.parse(b.startedAt ?? b.scheduledAt));
   const additions: number[] = [];
@@ -49,23 +54,25 @@ export function makePlan(snapshot: Snapshot, settings: Settings, previous: Exerc
     const exercise = chooseExercise(settings,
       settings.selection === "random" ? lastExerciseId : undefined, random);
     plan.push({
-      id: crypto.randomUUID(), date: snapshot.date, scheduledAt: new Date(time).toISOString(),
+      id: crypto.randomUUID(), date, scheduledAt: new Date(time).toISOString(),
       duration: settings.duration, exerciseId: exercise.id, status: "planned", snoozes: 0,
+      scheduleMode: snapshot ? "calendar" : "spaced",
     });
     lastExerciseId = exercise.id;
   }
   return plan;
 }
 
-export function nextSnooze(snapshot: Snapshot, settings: Settings, item: ExerciseBreak, breaks: ExerciseBreak[], now: number): string {
-  const [, workEnd] = workBounds(snapshot.date, settings);
+export function nextSnooze(snapshot: Snapshot | null, settings: Settings, item: ExerciseBreak, breaks: ExerciseBreak[], now: number): string {
+  const [, workEnd] = workBounds(item.date, settings);
   const earliest = Math.max(now, Date.parse(item.scheduledAt)) + 15 * MINUTE;
   for (let t = Math.ceil(earliest / MINUTE) * MINUTE; t < workEnd; t += MINUTE) {
-    if (fits(snapshot, settings, t, item.duration) &&
+    if ((item.scheduleMode === "spaced" ? fitsWorkday(item.date, settings, t, item.duration)
+      : snapshot !== null && fits(snapshot, settings, t, item.duration)) &&
         breaks.filter((b) => b.id !== item.id && b.date === item.date && b.status !== "cancelled")
           .every((b) => Math.abs(t - Date.parse(b.startedAt ?? b.scheduledAt)) >= 60 * MINUTE)) {
       return new Date(t).toISOString();
     }
   }
-  throw new Error("No suitable free slot remains for snoozing today. You can skip this break instead.");
+  throw new Error("No suitable reminder time remains today. You can skip this break instead.");
 }

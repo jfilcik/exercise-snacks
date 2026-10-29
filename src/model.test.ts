@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { API_VERSION, checkWorkerVersion, chooseExercise, DEFAULT_SETTINGS, exerciseChoices, exerciseOptions, parseSettings } from "./model.ts";
+import { API_VERSION, checkWorkerVersion, chooseExercise, DEFAULT_SETTINGS, exerciseChoices, exerciseOptions, parseAction, parseRepResult, parseSettings } from "./model.ts";
 
 const challenging = {
   ...DEFAULT_SETTINGS, difficulty: "challenging" as const, selection: "random" as const,
@@ -25,7 +25,7 @@ test("legacy calendar preferences require new setup without embedding a personal
 
 test("stale workers instruct users to reload without deleting data", () => {
   assert.doesNotThrow(() => checkWorkerVersion(API_VERSION));
-  for (const version of [undefined, null, 0, "1"]) {
+  for (const version of [undefined, null, 0, 3, 4, "1"]) {
     assert.throws(() => checkWorkerVersion(version), /different versions.*Reload.*history are kept/);
   }
 });
@@ -76,4 +76,17 @@ test("selection preferences reject empty random sets, unknown IDs, wrong styles,
     assert.throws(() => parseSettings({ ...challenging, ...patch }));
   }
   assert.deepEqual(parseSettings({ ...challenging, randomExerciseIds: ["squats", "squats"] }).randomExerciseIds, ["squats"]);
+});
+
+test("rep summaries accept only consistent bounded integers and never persist extra camera data", () => {
+  const reps = { targetReps: 10, completedReps: 9, automaticReps: 10, manualAdjustment: -1, countingMode: "camera" };
+  assert.deepEqual(parseRepResult({ ...reps, video: "not stored", landmarks: [1, 2, 3] }), reps);
+  for (const patch of [
+    { completedReps: 0 }, { targetReps: 0 }, { targetReps: 101 }, { completedReps: 1.5 },
+    { automaticReps: NaN }, { manualAdjustment: Infinity }, { completedReps: 1001 },
+    { manualAdjustment: -1001 }, { countingMode: "verified" }, { countingMode: "manual" },
+  ]) assert.throws(() => parseRepResult({ ...reps, ...patch }));
+  assert.deepEqual(parseAction({ type: "complete-reps", id: "break", reps }),
+    { type: "complete-reps", id: "break", reps });
+  assert.deepEqual(parseAction({ type: "start-early", id: "break" }), { type: "start-early", id: "break" });
 });

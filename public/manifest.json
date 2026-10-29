@@ -1,10 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Exercise Snacks",
-  "version": "0.2.0",
-  "description": "Local exercise breaks around your Microsoft personal Bookings availability or Google Calendar free/busy.",
+  "version": "0.3.5",
+  "description": "Local exercise reminders, optional calendar-aware timing, and an experimental squat rep counter.",
   "minimum_chrome_version": "120",
   "permissions": ["alarms", "notifications", "storage"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
   "host_permissions": ["https://bookings.cloud.microsoft/*", "https://login.microsoftonline.com/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "icons": { "128": "icon128.png" },

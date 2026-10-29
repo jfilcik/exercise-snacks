@@ -1,15 +1,20 @@
 {
   "name": "exercise-snacks",
-  "version": "0.2.0",
+  "version": "0.3.5",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit && vite build && node scripts/configure-google.mjs",
+    "dev:camera": "node scripts/prepare-camera.mjs && vite --host 127.0.0.1 --port 5175 --strictPort",
+    "build": "node scripts/prepare-camera.mjs && tsc --noEmit && vite build && node scripts/configure-google.mjs",
     "test": "node --experimental-strip-types --test src/*.test.ts scripts/build-config.test.mjs scripts/package-extension.test.mjs",
     "test:extension": "npm run build && node --test scripts/extension.test.mjs",
+    "test:reminders": "npm run build && node --test scripts/reminder-fallback.test.mjs",
+    "test:camera": "npm run build && node --test scripts/camera-reps.test.mjs",
+    "test:camera:private": "npm run build && node scripts/test-private-camera.mjs",
     "package:extension": "npm run build && node scripts/package-extension.mjs"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.21",
     "cldr-core": "^48.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
