@@ -7,7 +7,7 @@ Exercise Snacks is a lightweight Chrome and Edge extension that nudges you to
 take a 2- to 5-minute exercise break, helps you get started, and keeps track of
 what you finish. No Exercise Snacks account or cloud backend.
 
-**[Download the published install ZIP (v0.2.0)](https://github.com/jfilcik/exercise-snacks/releases/download/v0.2.0/exercise-snacks.zip)** · [Install steps](#install-in-chrome-or-edge) · [Technical README](TECHNICAL.md)
+**[Download the published install ZIP (v0.2.0)](https://github.com/jfilcik/exercise-snacks/releases/download/v0.2.0/exercise-snacks.zip)** · [Install steps](#install-in-chrome-or-edge) · [Technical README](docs/technical.md)
 
 > The direct download is the latest ZIP currently published on GitHub (v0.2.0). The current development build is v0.3.5 and is attached in this conversation; it has not been published as a GitHub release yet.
 
@@ -81,7 +81,7 @@ Edge 120 or later on a computer that allows unpacked extensions.
 > **Version note:** the current published ZIP is v0.2.0 and does not include
 > Camera Coach or calendar-free reminders. The screenshots describe local
 > v0.3.5. Use the attached v0.3.5 ZIP from this conversation or
-> [build the current source](TECHNICAL.md#build-from-source-instead) to try these
+> [build the current source](docs/technical.md#build-from-source-instead) to try these
 > newer features until a v0.3.5 release is published.
 
 1. For the latest published build, click the direct
@@ -109,11 +109,11 @@ to keep its local settings and history.
 Use your own public **Microsoft personal Bookings / Bookings with me**
 meeting-type link. Eligible Microsoft 365 Enterprise users may already have it;
 your organization must allow the feature and public publishing.
-[Follow the Bookings setup guide](TECHNICAL.md#microsoft-365-enterprise-set-up-personal-bookings).
+[Follow the Bookings setup guide](docs/technical.md#microsoft-365-enterprise-set-up-personal-bookings).
 Bookings is published availability, not access to your complete work calendar.
 
 Google Calendar / Gmail is also supported through an
-[optional OAuth-configured build](TECHNICAL.md#google-calendar-setup-optional-chrome).
+[optional OAuth-configured build](docs/technical.md#google-calendar-setup-optional-chrome).
 The standard ZIP does not have Google sign-in configured. No Gmail messages
 or event details are read; live Google sign-in has not been verified here.
 
@@ -124,4 +124,4 @@ training prescription.
 ---
 
 Building, permissions, privacy details, scheduling behavior, calendar setup,
-camera limitations, and regression tests live in the [technical README](TECHNICAL.md).
+camera limitations, and regression tests live in the [technical README](docs/technical.md).

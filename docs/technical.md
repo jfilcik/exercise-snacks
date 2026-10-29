@@ -1,7 +1,7 @@
 # Exercise Snacks: technical README
 
 For the product overview, research inspiration, screenshots, and quick install,
-see the [main README](README.md).
+see the [main README](../README.md).
 
 A local Chrome/Edge Manifest V3 extension that spaces short exercise reminders
 through your workday, optionally using **Microsoft personal Bookings / Bookings with me** availability. Supply your
@@ -84,14 +84,14 @@ synthetic demo reminders; no personal calendar or account data is displayed.
 `desktop-demo.png` is a composed browser-window illustration around the real,
 synthetic Today screenshot; the background browser page is not part of the app.
 
-![Exercise Snacks Today in a clean, full-screen browser context](docs/screenshots/desktop-demo.png)
+![Exercise Snacks Today in a clean, full-screen browser context](screenshots/desktop-demo.png)
 
-![Settings view showing optional calendar selection, time zone, exercise choices, and local reminder options](docs/screenshots/settings.png)
+![Settings view showing optional calendar selection, time zone, exercise choices, and local reminder options](screenshots/settings.png)
 
 Camera Coach opens in its own tab. This is the camera-off setup screen, not an
 image of a person or evidence of counting accuracy.
 
-![Camera Coach setup with an optional camera, squat target, rep counter, adjustments, and a manual alternative](docs/screenshots/camera-coach.png)
+![Camera Coach setup with an optional camera, squat target, rep counter, adjustments, and a manual alternative](screenshots/camera-coach.png)
 
 ## Daily flow
 
@@ -228,7 +228,7 @@ drop-in dependencies: no code or datasets from them are bundled here.
 ### Test Camera Coach locally
 
 Run `npm run dev:camera`, then open
-`http://localhost:5175/camera-preview.html?id=camera-preview-squat` in Chrome/Edge.
+`http://localhost:5175/scripts/camera-preview.html?id=camera-preview-squat` in Chrome/Edge.
 This development-only page starts a synthetic active squat without a calendar
 or extension installation. It runs the same camera and counter code, requests
 camera access only after **Enable camera counting**, and keeps test summaries

@@ -69,7 +69,7 @@ export async function packageExtension(directory = join(root, "dist"), output = 
     "To update, replace the files in the same folder and click Reload on the extension.",
     "The standard ZIP supports no calendar or Microsoft personal Bookings.",
     "Google Calendar needs a configured OAuth build. Time-based reminders may overlap meetings.",
-    "Setup and technical details: https://github.com/jfilcik/exercise-snacks/blob/main/TECHNICAL.md",
+    "Setup and technical details: https://github.com/jfilcik/exercise-snacks/blob/main/docs/technical.md",
     "",
   ].join("\n"));
   const archive = zipSync(files, { level: 9, mtime: new Date(2020, 0, 1) });
